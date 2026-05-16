@@ -27,7 +27,7 @@ A production-quality Golang tooling suite for Neovim 0.12+ that unifies the Go d
 
 ```lua
 {
-  "https://github.com/geo-afk/gotooljjs",
+  "https://github.com/geo-afk/gotools",
   ft = "go",
   config = function()
     require("gotools").setup({
