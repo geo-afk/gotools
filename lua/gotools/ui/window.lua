@@ -41,20 +41,23 @@ function M.open_float(buf, spec)
   local cfg = require("gotools.state").get("config") or {}
   local ui  = cfg.ui or {}
 
-  local cols   = vim.o.columns
-  local rows   = vim.o.lines
+  local function calc_dims()
+    local cols = vim.o.columns
+    local rows = vim.o.lines
+    local w = spec.width  or math.floor(cols * (spec.w_ratio or ui.width_ratio  or 0.8))
+    local h = spec.height or math.floor(rows * (spec.h_ratio or ui.height_ratio or 0.75))
+    local r = spec.row    and math.floor(rows * spec.row) or math.floor((rows - h) / 2)
+    local c = spec.col    and math.floor(cols * spec.col) or math.floor((cols - w) / 2)
+    return { row = r, col = c, width = w, height = h }
+  end
 
-  local w = spec.width  or math.floor(cols * (spec.w_ratio or ui.width_ratio  or 0.8))
-  local h = spec.height or math.floor(rows * (spec.h_ratio or ui.height_ratio or 0.75))
-  local r = spec.row    and math.floor(rows * spec.row) or math.floor((rows - h) / 2)
-  local c = spec.col    and math.floor(cols * spec.col) or math.floor((cols - w) / 2)
-
+  local dims = calc_dims()
   local win_opts = {
     relative  = "editor",
-    row       = r,
-    col       = c,
-    width     = w,
-    height    = h,
+    row       = dims.row,
+    col       = dims.col,
+    width     = dims.width,
+    height    = dims.height,
     style     = "minimal",
     border    = spec.border or ui.border or "rounded",
     title     = spec.title and (" " .. spec.title .. " ") or nil,
@@ -65,7 +68,8 @@ function M.open_float(buf, spec)
   local win = vim.api.nvim_open_win(buf, spec.enter ~= false, win_opts)
 
   vim.wo[win].winblend   = spec.blend or ui.blend or 0
-  vim.wo[win].wrap       = false
+  vim.wo[win].wrap       = true
+  vim.wo[win].linebreak  = true
   vim.wo[win].cursorline = true
   vim.wo[win].number     = false
   vim.wo[win].signcolumn = "no"
@@ -74,6 +78,25 @@ function M.open_float(buf, spec)
     "FloatBorder:GotoolsBorder",
     "CursorLine:GotoolsSelected",
   }, ",")
+
+  -- Re-center on resize
+  local group = vim.api.nvim_create_augroup("GotoolsWinResize_" .. win, { clear = true })
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = group,
+    callback = function()
+      if vim.api.nvim_win_is_valid(win) then
+        local new_dims = calc_dims()
+        vim.api.nvim_win_set_config(win, {
+          row    = new_dims.row,
+          col    = new_dims.col,
+          width  = new_dims.width,
+          height = new_dims.height,
+        })
+      else
+        pcall(vim.api.nvim_del_augroup_by_id, group)
+      end
+    end,
+  })
 
   state.push_win(win)
   return win
@@ -86,22 +109,27 @@ function M.open_split_float(title, spec)
   local cfg  = require("gotools.state").get("config") or {}
   local ui   = cfg.ui or {}
 
-  local cols   = vim.o.columns
-  local rows   = vim.o.lines
-  local w      = spec.width  or math.floor(cols * (spec.w_ratio or ui.width_ratio  or 0.85))
-  local h      = spec.height or math.floor(rows * (spec.h_ratio or ui.height_ratio or 0.8))
-  local r      = math.floor((rows - h) / 2)
-  local c      = math.floor((cols - w) / 2)
+  local function calc_dims()
+    local cols   = vim.o.columns
+    local rows   = vim.o.lines
+    local w      = spec.width  or math.floor(cols * (spec.w_ratio or ui.width_ratio  or 0.85))
+    local h      = spec.height or math.floor(rows * (spec.h_ratio or ui.height_ratio or 0.8))
+    local r      = math.floor((rows - h) / 2)
+    local c      = math.floor((cols - w) / 2)
 
-  local ratio  = spec.preview_ratio or ui.preview_ratio or 0.45
-  local lw     = math.floor(w * (1 - ratio)) - 1
-  local rw     = w - lw - 1
+    local ratio  = spec.preview_ratio or ui.preview_ratio or 0.45
+    local lw     = math.floor(w * (1 - ratio)) - 1
+    local rw     = w - lw - 1
+    return { row = r, col = c, width = w, height = h, lw = lw, rw = rw }
+  end
+
+  local d = calc_dims()
 
   -- Container (invisible, just provides border + title)
   local cont_buf = M.scratch_buf()
   local cont_win = vim.api.nvim_open_win(cont_buf, false, {
     relative  = "editor",
-    row = r, col = c, width = w, height = h,
+    row = d.row, col = d.col, width = d.width, height = d.height,
     style     = "minimal",
     border    = spec.border or ui.border or "rounded",
     title     = title and (" " .. title .. " ") or nil,
@@ -114,25 +142,45 @@ function M.open_split_float(title, spec)
   local l_buf = M.scratch_buf(spec.left_ft, false)
   local l_win = vim.api.nvim_open_win(l_buf, true, {
     relative = "editor",
-    row = r + 1, col = c + 1,
-    width = lw, height = h - 2,
+    row = d.row + 1, col = d.col + 1,
+    width = d.lw, height = d.height - 2,
     style = "minimal", border = "none", zindex = 50,
   })
   vim.wo[l_win].winhighlight = "Normal:NormalFloat,CursorLine:GotoolsSelected"
   vim.wo[l_win].cursorline   = true
+  vim.wo[l_win].wrap         = true
 
-  -- Divider col (just a vertical split marker via extmarks or just spacing)
   -- Right pane
   local r_buf = M.scratch_buf(spec.right_ft, false)
   local r_win = vim.api.nvim_open_win(r_buf, false, {
     relative = "editor",
-    row = r + 1, col = c + lw + 2,
-    width = rw - 1, height = h - 2,
+    row = d.row + 1, col = d.col + d.lw + 2,
+    width = d.rw - 1, height = d.height - 2,
     style = "minimal", border = "none", zindex = 50,
   })
   vim.wo[r_win].winhighlight = "Normal:NormalFloat"
   vim.wo[r_win].wrap         = true
   vim.wo[r_win].number       = false
+
+  -- Re-center handler
+  local group = vim.api.nvim_create_augroup("GotoolsSplitResize_" .. cont_win, { clear = true })
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = group,
+    callback = function()
+      if vim.api.nvim_win_is_valid(cont_win) then
+        local nd = calc_dims()
+        vim.api.nvim_win_set_config(cont_win, { row = nd.row, col = nd.col, width = nd.width, height = nd.height })
+        if vim.api.nvim_win_is_valid(l_win) then
+          vim.api.nvim_win_set_config(l_win, { row = nd.row + 1, col = nd.col + 1, width = nd.lw, height = nd.height - 2 })
+        end
+        if vim.api.nvim_win_is_valid(r_win) then
+          vim.api.nvim_win_set_config(r_win, { row = nd.row + 1, col = nd.col + nd.lw + 2, width = nd.rw - 1, height = nd.height - 2 })
+        end
+      else
+        pcall(vim.api.nvim_del_augroup_by_id, group)
+      end
+    end,
+  })
 
   state.push_win(l_win)
   state.push_win(r_win)
@@ -144,11 +192,19 @@ function M.open_split_float(title, spec)
   }
 end
 
----Close a window safely
+---Close a window safely and clean up state
 ---@param win integer
 function M.close(win)
   if win and vim.api.nvim_win_is_valid(win) then
     vim.api.nvim_win_close(win, true)
+  end
+  -- Clean up from stack
+  local stack = state.get("win_stack")
+  for i, w in ipairs(stack) do
+    if w == win then
+      table.remove(stack, i)
+      break
+    end
   end
 end
 

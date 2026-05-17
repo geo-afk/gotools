@@ -17,11 +17,18 @@ function M.start(msg)
   local timer = vim.uv.new_timer()
   _active[id] = { timer = timer, msg = msg }
 
-  timer:start(0, 80, vim.schedule_wrap(function()
+  timer:start(0, 100, vim.schedule_wrap(function()
     if not _active[id] then return end
     local icon = FRAMES[frame]
     frame = (frame % #FRAMES) + 1
-    vim.api.nvim_echo({{ (" %s  %s"):format(icon, msg), "GotoolsSpinner" }}, false, {})
+    
+    -- Only echo if this is the most recent active spinner
+    local max_id = 0
+    for aid, _ in pairs(_active) do if aid > max_id then max_id = aid end end
+    
+    if id == max_id then
+      vim.api.nvim_echo({{ (" %s  %s"):format(icon, msg), "GotoolsSpinner" }}, false, {})
+    end
   end))
 
   return id
@@ -36,10 +43,14 @@ function M.stop(id, done_msg)
   entry.timer:stop()
   entry.timer:close()
   _active[id] = nil
+  
   if done_msg then
     vim.api.nvim_echo({{ "  " .. done_msg, "GotoolsOk" }}, false, {})
   else
-    vim.api.nvim_echo({}, false, {})
+    -- Only clear if no other spinners are active
+    if vim.tbl_count(_active) == 0 then
+      vim.api.nvim_echo({}, false, {})
+    end
   end
 end
 

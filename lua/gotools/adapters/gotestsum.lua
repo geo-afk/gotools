@@ -89,73 +89,84 @@ function M.run(opts)
   local pkg_list = {}    -- ordered unique pkgs
   local seen_pkg = {}
 
+  -- Debounced render
+  local render_timer = vim.uv.new_timer()
   local function render()
-    if not vim.api.nvim_buf_is_valid(buf) then return end
-    vim.bo[buf].modifiable = true
-    vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-    local lines = {}
-    local hls   = {}
+    render_timer:stop()
+    render_timer:start(50, 0, vim.schedule_wrap(function()
+      if not vim.api.nvim_buf_is_valid(buf) then return end
+      vim.bo[buf].modifiable = true
+      vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+      local lines = {}
+      local hls   = {}
 
-    local function hl(l, cs, ce, grp)
-      table.insert(hls, { line = l, col_start = cs, col_end = ce, hl = grp })
-    end
-
-    table.insert(lines, "  Test Results  —  " .. pkg)
-    hl(0, 0, -1, "GotoolsTitle")
-    table.insert(lines, "")
-
-    -- Group by package
-    local by_pkg = {}
-    for key, t in pairs(tests) do
-      if not by_pkg[t.pkg] then by_pkg[t.pkg] = {} end
-      table.insert(by_pkg[t.pkg], t)
-    end
-
-    for _, p in ipairs(pkg_list) do
-      local pkg_tests = by_pkg[p] or {}
-      local pkg_pass  = vim.tbl_filter(function(t) return t.status == "pass" end, pkg_tests)
-      local pkg_fail  = vim.tbl_filter(function(t) return t.status == "fail" end, pkg_tests)
-      local pkg_skip  = vim.tbl_filter(function(t) return t.status == "skip" end, pkg_tests)
-
-      local pkg_hl = #pkg_fail > 0 and "GotoolsTestFail"
-                     or #pkg_pass > 0 and "GotoolsTestPass"
-                     or "GotoolsDim"
-      local pl = #lines
-      local psummary = ("  📦 %s  [%d/%d pass]"):format(
-        vim.fn.fnamemodify(p, ":t"), #pkg_pass, #pkg_tests)
-      table.insert(lines, psummary)
-      hl(pl, 2, -1, pkg_hl)
-
-      -- Sort: fails first
-      table.sort(pkg_tests, function(a, b)
-        local order = { fail = 0, run = 1, skip = 2, pass = 3 }
-        return (order[a.status] or 9) < (order[b.status] or 9)
-      end)
-
-      for _, t in ipairs(pkg_tests) do
-        local icon  = ICONS[t.status] or "?"
-        local hl_g  = t.status == "pass" and "GotoolsTestPass"
-                      or t.status == "fail" and "GotoolsTestFail"
-                      or t.status == "skip" and "GotoolsTestSkip"
-                      or "GotoolsTestRun"
-        local dur   = t.duration and ("  %.3fs"):format(t.duration) or ""
-        local l     = #lines
-        table.insert(lines, ("      %s  %s%s"):format(icon, t.name, dur))
-        hl(l, 6, 8, hl_g)
-        hl(l, 8, #t.name + 9, "Normal")
-        if dur ~= "" then hl(l, #t.name + 9, -1, "GotoolsDim") end
+      local function hl(l, cs, ce, grp)
+        table.insert(hls, { line = l, col_start = cs, col_end = ce, hl = grp })
       end
+
+      table.insert(lines, "  Test Results  —  " .. pkg)
+      hl(0, 0, -1, "GotoolsTitle")
       table.insert(lines, "")
-    end
 
-    table.insert(lines, "  [r] Rerun    [f] Rerun failed    [q] Close    [<CR>] Show output")
-    hl(#lines - 1, 0, -1, "GotoolsDim")
+      -- Group by package
+      local by_pkg = {}
+      for key, t in pairs(tests) do
+        if not by_pkg[t.pkg] then by_pkg[t.pkg] = {} end
+        table.insert(by_pkg[t.pkg], t)
+      end
 
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-    for _, h in ipairs(hls) do
-      vim.api.nvim_buf_add_highlight(buf, ns, h.hl, h.line, h.col_start, h.col_end)
-    end
-    vim.bo[buf].modifiable = false
+      -- Sort packages
+      table.sort(pkg_list)
+
+      for _, p in ipairs(pkg_list) do
+        local pkg_tests = by_pkg[p] or {}
+        local pkg_pass  = vim.tbl_filter(function(t) return t.status == "pass" end, pkg_tests)
+        local pkg_fail  = vim.tbl_filter(function(t) return t.status == "fail" end, pkg_tests)
+        local pkg_skip  = vim.tbl_filter(function(t) return t.status == "skip" end, pkg_tests)
+
+        local pkg_hl = #pkg_fail > 0 and "GotoolsTestFail"
+                       or #pkg_pass > 0 and "GotoolsTestPass"
+                       or "GotoolsDim"
+        local pl = #lines
+        local psummary = ("  📦 %s  [%d/%d pass]"):format(
+          vim.fn.fnamemodify(p, ":t"), #pkg_pass, #pkg_tests)
+        table.insert(lines, psummary)
+        hl(pl, 2, -1, pkg_hl)
+
+        -- Sort: fails first
+        table.sort(pkg_tests, function(a, b)
+          local order = { fail = 0, run = 1, skip = 2, pass = 3 }
+          local ao = order[a.status] or 9
+          local bo = order[b.status] or 9
+          if ao ~= bo then return ao < bo end
+          return a.name < b.name
+        end)
+
+        for _, t in ipairs(pkg_tests) do
+          local icon  = ICONS[t.status] or "?"
+          local hl_g  = t.status == "pass" and "GotoolsTestPass"
+                        or t.status == "fail" and "GotoolsTestFail"
+                        or t.status == "skip" and "GotoolsTestSkip"
+                        or "GotoolsTestRun"
+          local dur   = t.duration and ("  %.3fs"):format(t.duration) or ""
+          local l     = #lines
+          table.insert(lines, ("      %s  %s%s"):format(icon, t.name, dur))
+          hl(l, 6, 8, hl_g)
+          hl(l, 8, #t.name + 9, "Normal")
+          if dur ~= "" then hl(l, #t.name + 9, -1, "GotoolsDim") end
+        end
+        table.insert(lines, "")
+      end
+
+      table.insert(lines, "  [r] Rerun    [f] Rerun failed    [q] Close    [<CR>] Show output")
+      hl(#lines - 1, 0, -1, "GotoolsDim")
+
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+      for _, h in ipairs(hls) do
+        vim.api.nvim_buf_add_highlight(buf, ns, h.hl, h.line, h.col_start, h.col_end)
+      end
+      vim.bo[buf].modifiable = false
+    end))
   end
 
   -- Key: show test output
@@ -189,6 +200,17 @@ function M.run(opts)
       local run_pat = table.concat(vim.tbl_map(function(t) return t.name end, failed), "|")
       win.close(panel_win)
       M.run(vim.tbl_extend("force", opts, { run = run_pat }))
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    buffer = buf,
+    once   = true,
+    callback = function()
+      if render_timer then
+        render_timer:stop()
+        render_timer:close()
+      end
     end,
   })
 

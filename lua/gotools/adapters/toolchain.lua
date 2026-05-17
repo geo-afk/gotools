@@ -192,17 +192,16 @@ end
 
 function M.vet(bufnr, pkg)
   pkg = pkg or "./..."
-  local stdout = {}
-  local sid    = spinner.start("go vet…")
+  local sid = spinner.start("go vet " .. pkg .. "…")
   job.run({
     cmd     = { "go", "vet", pkg },
     cwd     = cwd(bufnr),
-    on_stdout = function(l) table.insert(stdout, l) end,
-    on_exit = function(code, _, stderr)
+    on_exit = function(code, stdout, stderr)
       spinner.stop(sid)
       if code ~= 0 then
+        local combined = (stdout ~= "" and stdout or "") .. (stderr ~= "" and "\n" .. stderr or "")
         local qf = {}
-        for _, line in ipairs(vim.split(stderr, "\n")) do
+        for _, line in ipairs(vim.split(combined, "\n")) do
           local file, lnum, msg = line:match("^(.+%.go):(%d+):(.+)$")
           if file then
             table.insert(qf, {
@@ -212,11 +211,15 @@ function M.vet(bufnr, pkg)
             })
           end
         end
+
         if #qf > 0 then
           vim.fn.setqflist(qf)
           notify.warn("go vet: issues found — :copen")
+          vim.cmd("copen")
         else
-          notify.error("go vet: " .. stderr:sub(1, 200))
+          -- If not parsable as qf, show raw output in floating window
+          local lines = vim.split(combined, "\n")
+          term.show_output(lines, "go vet output")
         end
       else
         notify.info("go vet: clean ✓")

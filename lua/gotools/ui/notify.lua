@@ -83,6 +83,10 @@ function M.missing_tools(missing)
   })
 end
 
+function M.install_prompt(name, cfg)
+  M.missing_tools({ { name = name, cfg = cfg } })
+end
+
 ---Show tool status dashboard
 function M.status_dashboard()
   local state   = require("gotools.state")

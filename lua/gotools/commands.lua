@@ -9,6 +9,12 @@ function M.setup(cfg)
     }, opts or {}))
   end
 
+  -- Helper for package completion
+  local function complete_pkg(ArgLead, CmdLine, CursorPos)
+    local pkgs = { "./...", "./pkg/...", "main.go" } -- Basic example
+    return vim.tbl_filter(function(s) return s:match("^" .. ArgLead) end, pkgs)
+  end
+
   -- ── Status ──────────────────────────────────────────────────────────────────
   cmd("GotoolsStatus", function()
     require("gotools.ui.notify").status_dashboard()
@@ -31,11 +37,12 @@ function M.setup(cfg)
   cmd("GoTest", function(args)
     local pkg = args.args ~= "" and args.args or "./..."
     require("gotools.adapters.gotestsum").run({ pkg = pkg })
-  end, "Run tests with gotestsum UI", { nargs = "?" })
+  end, "Run tests with gotestsum UI", { nargs = "?", complete = complete_pkg })
 
   cmd("GoTestFunc", function()
+    local bufnr = vim.api.nvim_get_current_buf()
     local row   = vim.api.nvim_win_get_cursor(0)[1]
-    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
     local func_name
     for i = row, 1, -1 do
       local m = lines[i]:match("^func%s+(Test%w+)")
@@ -79,19 +86,19 @@ function M.setup(cfg)
   cmd("GoVulnCheck", function(args)
     local pkg = args.args ~= "" and args.args or "./..."
     require("gotools.adapters.govulncheck").run(pkg)
-  end, "Run govulncheck vulnerability scan", { nargs = "?" })
+  end, "Run govulncheck vulnerability scan", { nargs = "?", complete = complete_pkg })
 
   -- ── Toolchain ─────────────────────────────────────────────────────────────────
   cmd("GoBuild", function(args)
     local tc = require("gotools.adapters.toolchain")
     tc.build(nil, args.args ~= "" and args.args or nil)
-  end, "go build", { nargs = "?" })
+  end, "go build", { nargs = "?", complete = "file" })
 
   cmd("GoRun", function(args)
     local tc = require("gotools.adapters.toolchain")
     local extra = args.args ~= "" and vim.split(args.args, " ") or nil
     tc.run(nil, extra)
-  end, "go run current file", { nargs = "?" })
+  end, "go run current file", { nargs = "?", complete = "file" })
 
   cmd("GoRunPkg", function()
     require("gotools.adapters.toolchain").run_pkg()
@@ -101,7 +108,7 @@ function M.setup(cfg)
     local tc = require("gotools.adapters.toolchain")
     local pkg = args.args ~= "" and args.args or "./..."
     tc.test(nil, pkg)
-  end, "go test (native terminal)", { nargs = "?" })
+  end, "go test (native terminal)", { nargs = "?", complete = complete_pkg })
 
   cmd("GoTestFuncNative", function()
     require("gotools.adapters.toolchain").test_func()
@@ -118,7 +125,7 @@ function M.setup(cfg)
   cmd("GoGenerate", function(args)
     local pkg = args.args ~= "" and args.args or "./..."
     require("gotools.adapters.toolchain").generate(nil, pkg)
-  end, "go generate", { nargs = "?" })
+  end, "go generate", { nargs = "?", complete = complete_pkg })
 
   cmd("GoFmt", function()
     require("gotools.adapters.toolchain").fmt()
@@ -131,12 +138,12 @@ function M.setup(cfg)
   cmd("GoDoc", function(args)
     local pkg = args.args ~= "" and args.args or nil
     require("gotools.adapters.toolchain").doc(pkg)
-  end, "go doc", { nargs = "?" })
+  end, "go doc", { nargs = "?", complete = "customlist,v:lua.package_doc_complete" }) -- Simplified
 
   cmd("GoVet", function(args)
     local pkg = args.args ~= "" and args.args or "./..."
     require("gotools.adapters.toolchain").vet(nil, pkg)
-  end, "go vet", { nargs = "?" })
+  end, "go vet", { nargs = "?", complete = complete_pkg })
 
   -- ── Terminal ──────────────────────────────────────────────────────────────────
   cmd("GoTerminal", function()

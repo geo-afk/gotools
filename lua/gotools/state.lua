@@ -53,11 +53,39 @@ function M.remove_job(id)
 end
 
 function M.push_win(win_id)
+  -- Don't push if already there
+  for _, w in ipairs(_state.win_stack) do
+    if w == win_id then return end
+  end
   table.insert(_state.win_stack, win_id)
 end
 
 function M.pop_win()
   return table.remove(_state.win_stack)
+end
+
+function M.get_active_win()
+  for i = #_state.win_stack, 1, -1 do
+    local win = _state.win_stack[i]
+    if vim.api.nvim_win_is_valid(win) then
+      return win
+    else
+      table.remove(_state.win_stack, i)
+    end
+  end
+  return nil
+end
+
+function M.cleanup_wins()
+  local i = 1
+  while i <= #_state.win_stack do
+    local win = _state.win_stack[i]
+    if not vim.api.nvim_win_is_valid(win) then
+      table.remove(_state.win_stack, i)
+    else
+      i = i + 1
+    end
+  end
 end
 
 function M.add_test_run(result)

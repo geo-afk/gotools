@@ -18,35 +18,37 @@ local M = {}
 ---@param opts JobOpts
 ---@return integer job_id
 function M.run(opts)
-  local id      = state.next_job_id()
+  local id = state.next_job_id()
   local stdout_buf = {}
   local stderr_buf = {}
+  local partial_stdout = ""
+  local partial_stderr = ""
 
   local sys_opts = {
-    cwd   = opts.cwd or vim.uv.cwd(),
-    env   = opts.env,
-    text  = true,
-    stdin = opts.stdin and opts.stdin or false,
-    stdout = function(err, data)
+    cwd    = opts.cwd or vim.uv.cwd(),
+    env    = opts.env,
+    text   = true,
+    stdin  = opts.stdin or false,
+    stdout = function(_, data)
       if data then
-        for _, line in ipairs(vim.split(data, "\n", { plain = true })) do
-          if line ~= "" then
-            table.insert(stdout_buf, line)
-            if opts.on_stdout then
-              vim.schedule(function() opts.on_stdout(line) end)
-            end
+        local lines = vim.split(partial_stdout .. data, "\n", { plain = true })
+        partial_stdout = table.remove(lines)
+        for _, line in ipairs(lines) do
+          table.insert(stdout_buf, line)
+          if opts.on_stdout then
+            vim.schedule(function() opts.on_stdout(line) end)
           end
         end
       end
     end,
-    stderr = function(err, data)
+    stderr = function(_, data)
       if data then
-        for _, line in ipairs(vim.split(data, "\n", { plain = true })) do
-          if line ~= "" then
-            table.insert(stderr_buf, line)
-            if opts.on_stderr then
-              vim.schedule(function() opts.on_stderr(line) end)
-            end
+        local lines = vim.split(partial_stderr .. data, "\n", { plain = true })
+        partial_stderr = table.remove(lines)
+        for _, line in ipairs(lines) do
+          table.insert(stderr_buf, line)
+          if opts.on_stderr then
+            vim.schedule(function() opts.on_stderr(line) end)
           end
         end
       end
@@ -54,6 +56,16 @@ function M.run(opts)
   }
 
   local handle = vim.system(opts.cmd, sys_opts, function(result)
+    -- Handle remaining partial data
+    if partial_stdout ~= "" then
+      table.insert(stdout_buf, partial_stdout)
+      if opts.on_stdout then vim.schedule(function() opts.on_stdout(partial_stdout) end) end
+    end
+    if partial_stderr ~= "" then
+      table.insert(stderr_buf, partial_stderr)
+      if opts.on_stderr then vim.schedule(function() opts.on_stderr(partial_stderr) end) end
+    end
+
     state.remove_job(id)
     vim.schedule(function()
       if opts.on_exit then

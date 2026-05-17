@@ -93,12 +93,14 @@ end
 function M.run_in_term(cmd, title, opts)
   opts       = opts or {}
   opts.title = title or opts.title or "gotools"
+  -- Default to persist = true for better UX unless explicitly disabled
+  if opts.persist == nil then opts.persist = true end
 
-  local key = opts.key
+  local key = opts.key or (title and title:gsub("%s+", "_"):lower())
   if key and opts.persist ~= false then
     local existing = state.get_terminal(key)
     if existing and vim.api.nvim_buf_is_valid(existing.buf) then
-      -- Re-show the window
+      -- Re-show the window if closed
       if not vim.api.nvim_win_is_valid(existing.win) then
         local new_win = win.open_float(existing.buf, {
           title   = opts.title,
@@ -108,8 +110,10 @@ function M.run_in_term(cmd, title, opts)
         existing.win = new_win
         state.set_terminal(key, existing)
       end
-      -- Send new command
-      vim.fn.chansend(existing.chan, cmd .. "\n")
+      -- Focus window
+      vim.api.nvim_set_current_win(existing.win)
+      -- Send new command: clear first if needed, or just append
+      vim.fn.chansend(existing.chan, "\x03" .. cmd .. "\n") -- Send Ctrl-C then command
       return existing
     end
   end
