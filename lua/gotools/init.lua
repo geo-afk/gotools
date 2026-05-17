@@ -20,8 +20,8 @@ M.config = {
 	ui = {
 		border = "rounded",
 		blend = 10,
-		width_ratio = 0.8,
-		height_ratio = 0.8,
+		width_ratio = 0.6,
+		height_ratio = 0.6,
 		preview_ratio = 0.45,
 	},
 	gotests = {
