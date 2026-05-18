@@ -39,10 +39,7 @@ M.config = {
 		transform = "snakecase",
 		skip_unexported = false,
 	},
-	keymaps = {
-		enable = true,
-		prefix = "<leader>h",
-	},
+
 	terminal = {
 		direction = "float",
 		persist = true,
@@ -55,11 +52,7 @@ function M.setup(opts)
 	-- Bootstrap submodules
 	require("gotools.state").init(M.config)
 	require("gotools.ui.highlights").setup()
-	require("gotools.commands").setup(M.config)
-
-	if M.config.keymaps.enable then
-		require("gotools.keymaps").setup(M.config)
-	end
+	require("gotools.commands").setup()
 
 	-- Periodic window cleanup
 	local cleanup_timer = vim.uv.new_timer()

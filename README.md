@@ -68,7 +68,7 @@ require("gotools").setup({
   },
   keymaps = {
     enable = true,
-    prefix = "<leader>g",
+    prefix = "<leader>h",
   },
   terminal = {
     direction = "float",   -- "float"|"split"|"vsplit"
@@ -140,36 +140,6 @@ require("gotools").setup({
 | ------------- | ------------------------ |
 | `:GoTerminal` | Open persistent Go shell |
 
-## Default Keymaps
-
-All keymaps are buffer-local (Go files only) and use `<leader>g` prefix by default.
-
-| Keymap        | Command        |
-| ------------- | -------------- |
-| `<leader>gtf` | GoTestGenFunc  |
-| `<leader>gta` | GoTestGenFile  |
-| `<leader>gtw` | GoTestGenWrite |
-| `<leader>gtr` | GoTest         |
-| `<leader>gtF` | GoTestFunc     |
-| `<leader>gtA` | GoTestAll      |
-| `<leader>gth` | GoTestHistory  |
-| `<leader>gms` | GoFillStruct   |
-| `<leader>gmw` | GoFillSwitch   |
-| `<leader>gmt` | GoModifyTags   |
-| `<leader>gme` | GoIfErr        |
-| `<leader>gb`  | GoBuild        |
-| `<leader>gr`  | GoRun          |
-| `<leader>gR`  | GoRunPkg       |
-| `<leader>gf`  | GoFmt          |
-| `<leader>gi`  | GoImports      |
-| `<leader>gd`  | GoDoc          |
-| `<leader>gv`  | GoVet          |
-| `<leader>gG`  | GoGenerate     |
-| `<leader>gM`  | GoModTidy      |
-| `<leader>gV`  | GoVulnCheck    |
-| `<leader>gT`  | GoTerminal     |
-| `<leader>gs`  | GotoolsStatus  |
-
 ## UI Navigation
 
 Most panels share these keys:
@@ -213,7 +183,6 @@ lua/gotools/
 ├── init.lua              # Setup & public API
 ├── state.lua             # Centralized state store
 ├── commands.lua          # User command registration
-├── keymaps.lua           # Buffer-local keymap setup
 ├── async/
 │   └── job.lua           # vim.system wrapper (non-blocking)
 ├── adapters/
