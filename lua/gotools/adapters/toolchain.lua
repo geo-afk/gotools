@@ -19,11 +19,15 @@ end
 ---@param title? string
 ---@param bufnr? integer
 function M.run_in_term(args, title, bufnr)
+  local t = title or ("go " .. args[1])
   local cmd = table.concat(vim.list_extend({ "go" }, args), " ")
-  term.run_in_term(cmd, title or ("go " .. args[1]), {
-    key     = "go_toolchain",
-    persist = false,
-    cwd     = cwd(bufnr),
+  -- Use title as the key so different commands (build, run, test…) each get
+  -- their own persistent terminal window rather than sharing one slot.
+  local key = "go_tc_" .. t:gsub("%W", "_"):lower()
+  term.run_in_term(cmd, t, {
+    key       = key,
+    persist   = true,
+    cwd       = cwd(bufnr),
     direction = "float",
   })
 end

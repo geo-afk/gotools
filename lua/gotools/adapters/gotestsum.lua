@@ -110,7 +110,7 @@ function M.run(opts)
 
       -- Group by package
       local by_pkg = {}
-      for key, t in pairs(tests) do
+      for _, t in pairs(tests) do
         if not by_pkg[t.pkg] then by_pkg[t.pkg] = {} end
         table.insert(by_pkg[t.pkg], t)
       end
@@ -282,7 +282,7 @@ function M.run(opts)
               local file, lnum, msg = out_line:match("%s+([%w_/%.]+%.go):(%d+): (.+)")
               if file then
                 table.insert(qf, {
-                  filename = cwd .. "/" .. file,
+                  filename = vim.fs.joinpath(cwd, file),
                   lnum     = tonumber(lnum),
                   text     = msg,
                 })

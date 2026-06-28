@@ -60,9 +60,9 @@ function M.open_float(buf, spec)
     height    = dims.height,
     style     = "minimal",
     border    = spec.border or ui.border or "rounded",
-    title     = spec.title and (" " .. spec.title .. " ") or nil,
+    title     = spec.title or nil,
     title_pos = "center",
-    zindex    = 50,
+    zindex    = spec.zindex or 50,
   }
 
   local win = vim.api.nvim_open_win(buf, spec.enter ~= false, win_opts)
@@ -149,7 +149,7 @@ function M.open_split_float(title, spec)
     row = d.row, col = d.col, width = d.width, height = d.height,
     style     = "minimal",
     border    = spec.border or ui.border or "rounded",
-    title     = title and (" " .. title .. " ") or nil,
+    title     = title or nil,
     title_pos = "center",
     zindex    = 48,
   })

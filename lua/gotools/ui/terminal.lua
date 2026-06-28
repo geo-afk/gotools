@@ -134,7 +134,7 @@ function M.run_in_term(cmd, title, opts)
       -- Focus window
       vim.api.nvim_set_current_win(existing.win)
       -- Send new command: clear first if needed, or just append
-      vim.fn.chansend(existing.chan, "\x03" .. cmd .. "\n") -- Send Ctrl-C then command
+      vim.fn.chansend(existing.chan, cmd .. "\n")
       return existing
     end
   end

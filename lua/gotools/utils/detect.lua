@@ -176,10 +176,12 @@ function M.detect_any_func(bufnr, row)
 	for i = row, 1, -1 do
 		local line = lines[i]
 		if line then
-			local m = line:match("^func%s+[%(]?[^%)]*[%)%s]*(%w+)")
-			if m then
-				return m
-			end
+			-- Method with receiver: func (recv Type) MethodName(
+			local m = line:match("^func%s+%b()%s+(%w+)%s*%(")
+			if m then return m end
+			-- Plain function: func FuncName(
+			m = line:match("^func%s+(%w+)%s*%(")
+			if m then return m end
 		end
 	end
 	return nil
