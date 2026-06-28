@@ -54,35 +54,37 @@ local function _make_term(cmd, opts)
   vim.wo[term_win].signcolumn = "no"
   vim.wo[term_win].wrap       = false
 
+  local function close_term()
+    local current_win = vim.api.nvim_get_current_win()
+    if vim.api.nvim_win_get_buf(current_win) == buf then
+      vim.api.nvim_win_close(current_win, true)
+    end
+  end
+
   -- Launch terminal job
   local chan = vim.fn.termopen(cmd, {
     cwd      = opts.cwd or vim.uv.cwd(),
     on_exit  = function(_, code, _)
       if opts.on_exit then opts.on_exit(code) end
-      if not opts.persist then
-        vim.schedule(function()
-          if vim.api.nvim_buf_is_valid(buf) then
-            vim.api.nvim_buf_delete(buf, { force = true })
-          end
-        end)
-      end
+      -- Map q and Esc in terminal mode to close the window easily once the process exits
+      vim.schedule(function()
+        if vim.api.nvim_buf_is_valid(buf) then
+          vim.keymap.set("t", "q",     close_term, { buffer = buf, nowait = true })
+          vim.keymap.set("t", "<Esc>", close_term, { buffer = buf, nowait = true })
+        end
+      end)
     end,
   })
 
   -- Auto enter insert in terminal
   vim.cmd("startinsert")
 
-  -- Keymap: close/toggle with <Esc> or q in normal mode
-  local function close_term()
-    if vim.api.nvim_win_is_valid(term_win) then
-      vim.api.nvim_win_close(term_win, true)
-    end
-  end
+  -- Keymaps
   vim.keymap.set("n", "q",     close_term, { buffer = buf, nowait = true })
   vim.keymap.set("n", "<Esc>", close_term, { buffer = buf, nowait = true })
   vim.keymap.set("t", "<C-\\><C-n>", "<C-\\><C-n>", { buffer = buf })
 
-  return { buf = buf, win = term_win, chan = chan }
+  return { buf = buf, win = term_win, chan = chan, opts = opts }
 end
 
 ---Run a shell command in a terminal window.
@@ -102,11 +104,30 @@ function M.run_in_term(cmd, title, opts)
     if existing and vim.api.nvim_buf_is_valid(existing.buf) then
       -- Re-show the window if closed
       if not vim.api.nvim_win_is_valid(existing.win) then
-        local new_win = win.open_float(existing.buf, {
-          title   = opts.title,
-          w_ratio = 0.85,
-          h_ratio = 0.75,
-        })
+        local new_win
+        local dir = (existing.opts and existing.opts.direction) or "float"
+        if dir == "float" then
+          new_win = win.open_float(existing.buf, {
+            title   = opts.title,
+            w_ratio = 0.85,
+            h_ratio = 0.75,
+          })
+        elseif dir == "split" then
+          local h = (existing.opts and existing.opts.height) or 15
+          vim.cmd("botright " .. h .. "split")
+          new_win = vim.api.nvim_get_current_win()
+          vim.api.nvim_win_set_buf(new_win, existing.buf)
+        elseif dir == "vsplit" then
+          local w = (existing.opts and existing.opts.width) or 80
+          vim.cmd("botright " .. w .. "vsplit")
+          new_win = vim.api.nvim_get_current_win()
+          vim.api.nvim_win_set_buf(new_win, existing.buf)
+        end
+
+        vim.wo[new_win].number     = false
+        vim.wo[new_win].signcolumn = "no"
+        vim.wo[new_win].wrap       = false
+
         existing.win = new_win
         state.set_terminal(key, existing)
       end

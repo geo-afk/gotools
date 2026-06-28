@@ -64,6 +64,43 @@ function M.show(original_lines, new_lines, title, on_accept)
     zindex   = 55,
   })
 
+  -- Resize handler for hint window
+  local group_hint = vim.api.nvim_create_augroup("GotoolsDiffHintResize_" .. hint_win, { clear = true })
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = group_hint,
+    callback = function()
+      if vim.api.nvim_win_is_valid(hint_win) then
+        local rows = vim.o.lines
+        local cols = vim.o.columns
+        vim.api.nvim_win_set_config(hint_win, {
+          row    = math.floor(rows * 0.8) + 1,
+          col    = math.floor(cols * 0.05),
+          width  = math.floor(cols * 0.9),
+        })
+      else
+        pcall(vim.api.nvim_del_augroup_by_id, group_hint)
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(hint_win),
+    once = true,
+    callback = function()
+      pcall(vim.api.nvim_del_augroup_by_id, group_hint)
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(panes.left_win),
+    once = true,
+    callback = function()
+      if vim.api.nvim_win_is_valid(hint_win) then
+        vim.api.nvim_win_close(hint_win, true)
+      end
+    end,
+  })
+
   local function close_all()
     for _, w in ipairs({ panes.cont_win, panes.left_win, panes.right_win, hint_win }) do
       win.close(w)

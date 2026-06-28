@@ -1,6 +1,13 @@
 -- lua/gotools/commands.lua
 local M = {}
 
+_G.package_doc_complete = function(ArgLead, CmdLine, CursorPos)
+	local stdlib = { "fmt", "os", "io", "strings", "time", "math", "net/http", "encoding/json", "context" }
+	return vim.tbl_filter(function(s)
+		return s:sub(1, #ArgLead) == ArgLead
+	end, stdlib)
+end
+
 function M.setup()
 	local function cmd(name, fn, desc, opts)
 		vim.api.nvim_create_user_command(
@@ -17,7 +24,7 @@ function M.setup()
 	local function complete_pkg(ArgLead, CmdLine, CursorPos)
 		local pkgs = { "./...", "./pkg/...", "main.go" } -- Basic example
 		return vim.tbl_filter(function(s)
-			return s:match("^" .. ArgLead)
+			return s:sub(1, #ArgLead) == ArgLead
 		end, pkgs)
 	end
 
@@ -48,15 +55,7 @@ function M.setup()
 	cmd("GoTestFunc", function()
 		local bufnr = vim.api.nvim_get_current_buf()
 		local row = vim.api.nvim_win_get_cursor(0)[1]
-		local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-		local func_name
-		for i = row, 1, -1 do
-			local m = lines[i]:match("^func%s+(Test%w+)")
-			if m then
-				func_name = m
-				break
-			end
-		end
+		local func_name = require("gotools.utils.detect").detect_test_func(bufnr, row)
 		if func_name then
 			require("gotools.adapters.gotestsum").run({ run = func_name })
 		else

@@ -62,12 +62,7 @@ end
 function M.test_func()
   local bufnr = vim.api.nvim_get_current_buf()
   local row   = vim.api.nvim_win_get_cursor(0)[1]
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local func_name
-  for i = row, 1, -1 do
-    local m = lines[i]:match("^func%s+(Test%w+)")
-    if m then func_name = m; break end
-  end
+  local func_name = detect.detect_test_func(bufnr, row)
   if not func_name then
     notify.warn("toolchain: not inside a Test function")
     return

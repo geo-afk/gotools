@@ -149,4 +149,40 @@ function M.is_wsl()
 	return false
 end
 
+---Detect the name of the test function at or above the cursor
+---@param bufnr integer
+---@param row integer  1-indexed row
+---@return string|nil
+function M.detect_test_func(bufnr, row)
+	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	for i = row, 1, -1 do
+		local line = lines[i]
+		if line then
+			local m = line:match("^func%s+(Test%w+)") or line:match("^func%s*%([^%)]+%)%s*(Test%w+)")
+			if m then
+				return m
+			end
+		end
+	end
+	return nil
+end
+
+---Detect the name of any function at or above the cursor
+---@param bufnr integer
+---@param row integer  1-indexed row
+---@return string|nil
+function M.detect_any_func(bufnr, row)
+	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	for i = row, 1, -1 do
+		local line = lines[i]
+		if line then
+			local m = line:match("^func%s+[%(]?[^%)]*[%)%s]*(%w+)")
+			if m then
+				return m
+			end
+		end
+	end
+	return nil
+end
+
 return M

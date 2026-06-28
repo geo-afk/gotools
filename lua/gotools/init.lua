@@ -39,7 +39,6 @@ M.config = {
 		transform = "snakecase",
 		skip_unexported = false,
 	},
-
 	terminal = {
 		direction = "float",
 		persist = true,

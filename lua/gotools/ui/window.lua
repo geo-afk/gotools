@@ -99,6 +99,23 @@ function M.open_float(buf, spec)
   })
 
   state.push_win(win)
+
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(win),
+    once = true,
+    callback = function()
+      -- Remove from stack
+      local stack = state.get("win_stack")
+      for i, w in ipairs(stack) do
+        if w == win then
+          table.remove(stack, i)
+          break
+        end
+      end
+      pcall(vim.api.nvim_del_augroup_by_id, group)
+    end,
+  })
+
   return win
 end
 
@@ -181,6 +198,24 @@ function M.open_split_float(title, spec)
       end
     end,
   })
+
+  local closing = false
+  local function close_panes()
+    if closing then return end
+    closing = true
+    pcall(vim.api.nvim_del_augroup_by_id, group)
+    M.close(l_win)
+    M.close(r_win)
+    M.close(cont_win)
+  end
+
+  for _, w in ipairs({ cont_win, l_win, r_win }) do
+    vim.api.nvim_create_autocmd("WinClosed", {
+      pattern = tostring(w),
+      once = true,
+      callback = close_panes,
+    })
+  end
 
   state.push_win(l_win)
   state.push_win(r_win)
