@@ -174,27 +174,65 @@ function M.is_wsl()
 	return false
 end
 
+local function is_test_name(name)
+	if not name or name == "" then
+		return false
+	end
+	return name:match("^Test[%w_]*$") ~= nil
+		or name:match("^Benchmark[%w_]*$") ~= nil
+		or name:match("^Example[%w_]*$") ~= nil
+		or name:match("^Fuzz[%w_]*$") ~= nil
+end
+
+local function check_test_line(line)
+	if not line then
+		return nil
+	end
+	return line:match("^%s*func%s+(Test[%w_]*)")
+		or line:match("^%s*func%s+(Benchmark[%w_]*)")
+		or line:match("^%s*func%s+(Example[%w_]*)")
+		or line:match("^%s*func%s+(Fuzz[%w_]*)")
+		or line:match("^%s*func%s*%b()%s*(Test[%w_]*)")
+		or line:match("^%s*func%s*%b()%s*(Benchmark[%w_]*)")
+		or line:match("^%s*func%s*%b()%s*(Example[%w_]*)")
+		or line:match("^%s*func%s*%b()%s*(Fuzz[%w_]*)")
+end
+
 ---Detect the name of the test function at or above the cursor
 ---@param bufnr integer?
 ---@param row integer?  1-indexed row
 ---@return string|nil
 function M.detect_test_func(bufnr, row)
-	bufnr = bufnr or vim.api.nvim_get_current_buf()
-	row = row or vim.api.nvim_win_get_cursor(0)[1]
+	local win = vim.api.nvim_get_current_win()
+	local cursor = vim.api.nvim_win_get_cursor(win)
+	bufnr = bufnr or vim.api.nvim_win_get_buf(win)
+	row = row or cursor[1]
+	local col = cursor[2] or 0
 
 	-- Try treesitter first (Neovim 0.12 native)
 	local ok_ts, ts = pcall(require, "vim.treesitter")
 	if ok_ts and ts.get_node then
-		local ok_node, node = pcall(ts.get_node, { bufnr = bufnr, pos = { row - 1, 0 } })
+		local ok_node, node = pcall(ts.get_node, { bufnr = bufnr, pos = { row - 1, col } })
+		if not (ok_node and node) then
+			ok_node, node = pcall(ts.get_node)
+		end
 		if ok_node and node then
 			local curr = node
 			while curr do
 				local ntype = curr:type()
 				if ntype == "function_declaration" or ntype == "method_declaration" then
+					local name_nodes = curr:field("name")
+					if name_nodes and #name_nodes > 0 then
+						local name = vim.treesitter.get_node_text(name_nodes[1], bufnr)
+						if is_test_name(name) then
+							return name
+						end
+					end
 					for child in curr:iter_children() do
-						if child:type() == "identifier" or child:type() == "field_identifier" then
+						local ctype = child:type()
+						if ctype == "identifier" or ctype == "field_identifier" then
 							local name = vim.treesitter.get_node_text(child, bufnr)
-							if name and name:match("^(Test|Benchmark|Example)[%w_]*") then
+							if is_test_name(name) then
 								return name
 							end
 						end
@@ -205,18 +243,41 @@ function M.detect_test_func(bufnr, row)
 		end
 	end
 
-	-- Fallback to regex backwards scan
+	-- Fallback to line scanning
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	for i = math.min(row, #lines), 1, -1 do
+
+	-- 1. Scan upwards from current row:
+	-- If we hit '}' at column 0 first, we exited a previous function, so stop upwards scan
+	for i = row, 1, -1 do
 		local line = lines[i]
 		if line then
-			local m = line:match("^%s*func%s+((Test|Benchmark|Example)[%w_]*)")
-				or line:match("^%s*func%s*%b()%s*((Test|Benchmark|Example)[%w_]*)")
+			local m = check_test_line(line)
 			if m then
 				return m
 			end
+			if line:match("^%s*func%s+") or line:match("^%s*func%s*%b()") then
+				break
+			end
+			if i < row and line:match("^}") then
+				break
+			end
 		end
 	end
+
+	-- 2. Scan downwards if cursor is on comment or blank lines right above a test
+	for i = row + 1, math.min(row + 20, #lines) do
+		local line = lines[i]
+		if line then
+			local m = check_test_line(line)
+			if m then
+				return m
+			end
+			if line:match("^%s*func%s+") or line:match("^%s*func%s*%b()") then
+				break
+			end
+		end
+	end
+
 	return nil
 end
 
@@ -225,22 +286,36 @@ end
 ---@param row integer?  1-indexed row
 ---@return string|nil
 function M.detect_any_func(bufnr, row)
-	bufnr = bufnr or vim.api.nvim_get_current_buf()
-	row = row or vim.api.nvim_win_get_cursor(0)[1]
+	local win = vim.api.nvim_get_current_win()
+	local cursor = vim.api.nvim_win_get_cursor(win)
+	bufnr = bufnr or vim.api.nvim_win_get_buf(win)
+	row = row or cursor[1]
+	local col = cursor[2] or 0
 
 	-- Try treesitter first (Neovim 0.12 native)
 	local ok_ts, ts = pcall(require, "vim.treesitter")
 	if ok_ts and ts.get_node then
-		local ok_node, node = pcall(ts.get_node, { bufnr = bufnr, pos = { row - 1, 0 } })
+		local ok_node, node = pcall(ts.get_node, { bufnr = bufnr, pos = { row - 1, col } })
+		if not (ok_node and node) then
+			ok_node, node = pcall(ts.get_node)
+		end
 		if ok_node and node then
 			local curr = node
 			while curr do
 				local ntype = curr:type()
 				if ntype == "function_declaration" or ntype == "method_declaration" then
+					local name_nodes = curr:field("name")
+					if name_nodes and #name_nodes > 0 then
+						local name = vim.treesitter.get_node_text(name_nodes[1], bufnr)
+						if name and name ~= "" then
+							return name
+						end
+					end
 					for child in curr:iter_children() do
-						if child:type() == "identifier" or child:type() == "field_identifier" then
+						local ctype = child:type()
+						if ctype == "identifier" or ctype == "field_identifier" then
 							local name = vim.treesitter.get_node_text(child, bufnr)
-							if name then
+							if name and name ~= "" then
 								return name
 							end
 						end
@@ -261,8 +336,21 @@ function M.detect_any_func(bufnr, row)
 			-- Plain function: func FuncName(
 			m = line:match("^%s*func%s+([%w_]+)%s*%(")
 			if m then return m end
+			if i < row and line:match("^}") then
+				break
+			end
 		end
 	end
+
+	for i = row + 1, math.min(row + 20, #lines) do
+		local line = lines[i]
+		if line then
+			local m = line:match("^%s*func%s+%b()%s+([%w_]+)%s*%(")
+				or line:match("^%s*func%s+([%w_]+)%s*%(")
+			if m then return m end
+		end
+	end
+
 	return nil
 end
 

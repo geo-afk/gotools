@@ -418,8 +418,10 @@ function M.run(opts)
 			state.add_test_run({
 				time = os.time(),
 				pkg = pkg,
+				run = opts.run,
 				code = code,
 				results = vim.deepcopy(tests),
+				pkg_outputs = vim.deepcopy(pkg_outputs),
 			})
 
 			-- Quickfix: collect failures from individual tests and package-level build errors
@@ -462,7 +464,7 @@ function M.run(opts)
 	})
 end
 
----Show test history panel
+---Show detailed, interactive test history panel
 function M.history()
 	local hist = state.get_test_history()
 	local win_mod = require("gotools.ui.window")
@@ -471,30 +473,205 @@ function M.history()
 		return
 	end
 
-	local lines = { "  Test History", "" }
-	local hls = { { line = 0, col_start = 0, col_end = -1, hl = "GotoolsTitle" } }
+	local buf = win_mod.scratch_buf("gotools_test_history", false)
+	local title_str = (" Test History (%d %s) "):format(#hist, #hist == 1 and "run" or "runs")
+	local w = win_mod.open_float(buf, {
+		title = title_str,
+		w_ratio = 0.85,
+		h_ratio = 0.8,
+	})
+
+	local ns = vim.api.nvim_create_namespace("gotools_history")
+	local lines = {}
+	local hls = {}
+	local line_map = {} -- line_nr -> { type = "test"|"run"|"build", run = run, test = t }
+
+	local function hl(l, cs, ce, grp)
+		table.insert(hls, { line = l, col_start = cs, col_end = ce, hl = grp })
+	end
+
+	table.insert(lines, "  Test History  —  Recent Runs")
+	hl(0, 0, -1, "GotoolsTitle")
+	table.insert(lines, "")
 
 	for i, run in ipairs(hist) do
 		local icon = run.code == 0 and "✓" or "✗"
 		local hl_g = run.code == 0 and "GotoolsTestPass" or "GotoolsTestFail"
 		local t = os.date("%H:%M:%S", run.time)
+
+		-- Collect test stats for this run
+		local run_tests = vim.tbl_values(run.results or {})
+		local pass_tests = vim.tbl_filter(function(x) return x.status == "pass" end, run_tests)
+		local fail_tests = vim.tbl_filter(function(x) return x.status == "fail" end, run_tests)
+		local skip_tests = vim.tbl_filter(function(x) return x.status == "skip" end, run_tests)
+
+		local target_desc = run.pkg or "./..."
+		if run.run and run.run ~= "" then
+			target_desc = target_desc .. " : " .. run.run
+		end
+
+		local summary_str
+		if #run_tests > 0 then
+			summary_str = ("[%d/%d pass%s]"):format(
+				#pass_tests,
+				#run_tests,
+				#skip_tests > 0 and (", " .. #skip_tests .. " skip") or ""
+			)
+		elseif run.code ~= 0 then
+			summary_str = "[build failed]"
+		else
+			summary_str = "[no tests]"
+		end
+
+		local header_line = ("  [#%d] %s  %s  %s  %s"):format(i, icon, t, target_desc, summary_str)
 		local l = #lines
-		table.insert(lines, ("  %s  [%s]  %s"):format(icon, t, run.pkg))
-		table.insert(hls, { line = l, col_start = 2, col_end = 4, hl = hl_g })
+		table.insert(lines, header_line)
+		line_map[l + 1] = { type = "run", run = run }
+		hl(l, 2, 7 + #tostring(i), "GotoolsDim")
+		hl(l, 8 + #tostring(i), 10 + #tostring(i), hl_g)
+		hl(l, 11 + #tostring(i), -1, "Normal")
+
+		-- Sort tests: fail first, then run, skip, pass
+		table.sort(run_tests, function(a, b)
+			local order = { fail = 0, run = 1, skip = 2, pass = 3 }
+			local ao = order[a.status] or 9
+			local bo = order[b.status] or 9
+			if ao ~= bo then return ao < bo end
+			return a.name < b.name
+		end)
+
+		-- Show individual tests
+		for _, test in ipairs(run_tests) do
+			local t_icon = ICONS[test.status] or "?"
+			local t_hl = test.status == "pass" and "GotoolsTestPass"
+				or test.status == "fail" and "GotoolsTestFail"
+				or test.status == "skip" and "GotoolsTestSkip"
+				or "GotoolsTestRun"
+			local dur = test.duration and ("  %.3fs"):format(test.duration) or ""
+			local tl = #lines
+			table.insert(lines, ("      %s  %s%s"):format(t_icon, test.name, dur))
+			line_map[tl + 1] = { type = "test", test = test, run = run }
+			hl(tl, 6, 8, t_hl)
+			hl(tl, 8, #test.name + 9, "Normal")
+			if dur ~= "" then
+				hl(tl, #test.name + 9, -1, "GotoolsDim")
+			end
+		end
+
+		-- If build error / no tests ran
+		if #run_tests == 0 and run.code ~= 0 then
+			local bl = #lines
+			table.insert(lines, "      ⚙  [build failed / compiler error] (press <CR> to view output)")
+			line_map[bl + 1] = { type = "build", run = run }
+			hl(bl, 6, 8, "GotoolsTestFail")
+			hl(bl, 8, -1, "Normal")
+		end
+
+		table.insert(lines, "")
 	end
 
-	table.insert(lines, "")
-	table.insert(lines, "  [q] Close")
+	table.insert(lines, "  [<CR>] View output    [r] Rerun run    [f] Rerun fails    [q] Close")
+	hl(#lines - 1, 0, -1, "GotoolsDim")
 
-	local buf = win_mod.scratch_buf(nil, false)
-	win_mod.set_lines(buf, lines, hls)
-	local w = win_mod.open_float(buf, { title = " Test History ", h_ratio = 0.5, w_ratio = 0.5 })
+	vim.bo[buf].modifiable = true
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+	for _, h in ipairs(hls) do
+		vim.api.nvim_buf_add_highlight(buf, ns, h.hl, h.line, h.col_start, h.col_end)
+	end
+	vim.bo[buf].modifiable = false
+
+	local function show_history_output()
+		local row = vim.api.nvim_win_get_cursor(w)[1]
+		local item = line_map[row]
+		if not item then
+			for d = 1, 3 do
+				if line_map[row - d] then item = line_map[row - d]; break end
+				if line_map[row + d] then item = line_map[row + d]; break end
+			end
+		end
+
+		if not item then
+			notify.info("Move cursor to a test or run entry and press <CR>")
+			return
+		end
+
+		if item.type == "test" then
+			local t = item.test
+			local out = (t.output and #t.output > 0) and t.output or { "(no output recorded for " .. t.name .. ")" }
+			require("gotools.ui.terminal").show_output(out, "Test: " .. t.name .. " [" .. (t.status or "unknown") .. "]")
+		elseif item.type == "run" or item.type == "build" then
+			local r = item.run
+			local all_out = {}
+			-- Add compiler / package outputs
+			for pkg_name, p_outs in pairs(r.pkg_outputs or {}) do
+				if #all_out > 0 then table.insert(all_out, "") end
+				table.insert(all_out, "=== Package: " .. pkg_name .. " ===")
+				vim.list_extend(all_out, p_outs)
+			end
+			-- Add test outputs
+			for _, t in pairs(r.results or {}) do
+				if #all_out > 0 then table.insert(all_out, "") end
+				table.insert(all_out, "=== RUN   " .. t.name)
+				if t.output and #t.output > 0 then
+					vim.list_extend(all_out, t.output)
+				end
+				table.insert(all_out, "--- " .. (t.status or "FAIL"):upper() .. ": " .. t.name .. (t.duration and (" (%.3fs)"):format(t.duration) or ""))
+			end
+			if #all_out == 0 then
+				table.insert(all_out, "(no output recorded for this run)")
+			end
+			local desc = r.pkg or "./..."
+			if r.run and r.run ~= "" then desc = desc .. " : " .. r.run end
+			require("gotools.ui.terminal").show_output(all_out, "Run Output: " .. desc)
+		end
+	end
+
+	local function rerun_selected(only_fails)
+		local row = vim.api.nvim_win_get_cursor(w)[1]
+		local item = line_map[row]
+		if not item then
+			for d = 1, 5 do
+				if line_map[row - d] then item = line_map[row - d]; break end
+				if line_map[row + d] then item = line_map[row + d]; break end
+			end
+		end
+		if not item or not item.run then
+			notify.warn("Select a run to rerun")
+			return
+		end
+
+		local r = item.run
+		local run_pat = r.run
+		if only_fails then
+			local failed = vim.tbl_filter(function(x) return x.status == "fail" end, vim.tbl_values(r.results or {}))
+			if #failed == 0 then
+				notify.info("No failed tests in this run")
+				return
+			end
+			run_pat = table.concat(vim.tbl_map(function(x) return x.name end, failed), "|")
+		end
+
+		win_mod.close(w)
+		M.run({
+			pkg = r.pkg,
+			run = run_pat,
+			verbose = true,
+		})
+	end
+
 	win_mod.buf_map(buf, {
 		["q"] = function()
 			win_mod.close(w)
 		end,
 		["<Esc>"] = function()
 			win_mod.close(w)
+		end,
+		["<CR>"] = show_history_output,
+		["r"] = function()
+			rerun_selected(false)
+		end,
+		["f"] = function()
+			rerun_selected(true)
 		end,
 	})
 end
