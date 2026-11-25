@@ -71,8 +71,8 @@ function M.test_func()
     notify.warn("toolchain: not inside a Test function")
     return
   end
-  local pkg = detect.package_of(bufnr)
-  M.run_in_term({ "test", "-v", "-run", func_name, pkg }, "go test: " .. func_name, bufnr)
+  local pkg = detect.package_rel(bufnr)
+  M.run_in_term({ "test", "-v", "-run", "^" .. func_name .. "$", pkg }, "go test: " .. func_name, bufnr)
 end
 
 -- ─── Mod ─────────────────────────────────────────────────────────────────────

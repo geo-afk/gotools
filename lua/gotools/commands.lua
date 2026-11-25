@@ -49,22 +49,24 @@ function M.setup()
 	-- ── gotestsum ────────────────────────────────────────────────────────────────
 	cmd("GoTest", function(args)
 		local pkg = args.args ~= "" and args.args or "./..."
-		require("gotools.adapters.gotestsum").run({ pkg = pkg })
+		require("gotools.adapters.gotestsum").run({ pkg = pkg, verbose = true })
 	end, "Run tests with gotestsum UI", { nargs = "?", complete = complete_pkg })
 
 	cmd("GoTestFunc", function()
 		local bufnr = vim.api.nvim_get_current_buf()
 		local row = vim.api.nvim_win_get_cursor(0)[1]
-		local func_name = require("gotools.utils.detect").detect_test_func(bufnr, row)
+		local detect = require("gotools.utils.detect")
+		local func_name = detect.detect_test_func(bufnr, row)
 		if func_name then
-			require("gotools.adapters.gotestsum").run({ run = func_name })
+			local pkg = detect.package_rel(bufnr)
+			require("gotools.adapters.gotestsum").run({ run = func_name, pkg = pkg, verbose = true })
 		else
 			require("gotools.ui.notify").warn("GoTestFunc: no Test function at cursor")
 		end
 	end, "Run test function under cursor")
 
 	cmd("GoTestAll", function()
-		require("gotools.adapters.gotestsum").run({ pkg = "./..." })
+		require("gotools.adapters.gotestsum").run({ pkg = "./...", verbose = true })
 	end, "Run all tests")
 
 	cmd("GoTestHistory", function()

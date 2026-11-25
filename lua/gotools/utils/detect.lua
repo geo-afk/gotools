@@ -94,38 +94,63 @@ end
 ---@param path string  file or dir path
 ---@return string|nil  module root dir
 function M.find_module_root(path)
+	if not path or path == "" then
+		path = vim.uv.cwd()
+	end
 	local dir = vim.fn.isdirectory(path) == 1 and path or vim.fn.fnamemodify(path, ":h")
 	local result = vim.fs.find("go.mod", { upward = true, path = dir })
 	if result and #result > 0 then
-		return vim.fn.fnamemodify(result[1], ":h")
+		return vim.fs.normalize(vim.fn.fnamemodify(result[1], ":h"))
 	end
 	return nil
 end
 
+---Detect relative package path for testing/running from module root or cwd
+---@param bufnr integer?
+---@return string  e.g. "." or "./pkg/auth"
+function M.package_rel(bufnr)
+	local file = vim.api.nvim_buf_get_name(bufnr or 0)
+	if not file or file == "" then
+		return "."
+	end
+	local root = M.find_module_root(file) or vim.uv.cwd()
+	local file_dir = vim.fs.normalize(vim.fn.fnamemodify(file, ":h"))
+	local root_norm = vim.fs.normalize(root)
+	if file_dir == root_norm or file_dir:sub(1, #root_norm) ~= root_norm then
+		return "."
+	end
+	local rel = file_dir:sub(#root_norm + 2)
+	return (rel == "" or rel == ".") and "." or "./" .. rel
+end
+
 ---Detect current package import path
 ---@param bufnr integer
----@return string  e.g. "github.com/foo/bar/pkg"
+---@return string  e.g. "github.com/foo/bar/pkg" or "."
 function M.package_of(bufnr)
-	local file = vim.api.nvim_buf_get_name(bufnr)
+	local file = vim.api.nvim_buf_get_name(bufnr or 0)
 	local root = M.find_module_root(file)
 	if not root then
 		return "."
 	end
-	local rel = vim.fn.fnamemodify(file, ":h")
-	local pkg = rel:sub(#root + 2) -- strip root prefix
+	local file_dir = vim.fs.normalize(vim.fn.fnamemodify(file, ":h"))
+	local root_norm = vim.fs.normalize(root)
+	local rel = ""
+	if file_dir ~= root_norm and file_dir:sub(1, #root_norm) == root_norm then
+		rel = file_dir:sub(#root_norm + 2)
+	end
 	-- Read module name from go.mod
-	local mod_file = root .. "/go.mod"
+	local mod_file = vim.fs.joinpath(root_norm, "go.mod")
 	local f = io.open(mod_file, "r")
 	if not f then
-		return "./" .. pkg
+		return rel == "" and "." or "./" .. rel
 	end
-	local mod_line = f:read("l")
+	local mod_line = f:read("*l")
 	f:close()
 	local mod_name = mod_line and mod_line:match("^module%s+(%S+)")
-	if not mod_name then
-		return "./" .. pkg
+	if not mod_name or mod_name == "main" then
+		return rel == "" and "." or "./" .. rel
 	end
-	return mod_name .. (pkg ~= "" and "/" .. pkg or "")
+	return mod_name .. (rel ~= "" and "/" .. rel or "")
 end
 
 ---Return OS-aware install command string
@@ -150,15 +175,43 @@ function M.is_wsl()
 end
 
 ---Detect the name of the test function at or above the cursor
----@param bufnr integer
----@param row integer  1-indexed row
+---@param bufnr integer?
+---@param row integer?  1-indexed row
 ---@return string|nil
 function M.detect_test_func(bufnr, row)
+	bufnr = bufnr or vim.api.nvim_get_current_buf()
+	row = row or vim.api.nvim_win_get_cursor(0)[1]
+
+	-- Try treesitter first (Neovim 0.12 native)
+	local ok_ts, ts = pcall(require, "vim.treesitter")
+	if ok_ts and ts.get_node then
+		local ok_node, node = pcall(ts.get_node, { bufnr = bufnr, pos = { row - 1, 0 } })
+		if ok_node and node then
+			local curr = node
+			while curr do
+				local ntype = curr:type()
+				if ntype == "function_declaration" or ntype == "method_declaration" then
+					for child in curr:iter_children() do
+						if child:type() == "identifier" or child:type() == "field_identifier" then
+							local name = vim.treesitter.get_node_text(child, bufnr)
+							if name and name:match("^(Test|Benchmark|Example)[%w_]*") then
+								return name
+							end
+						end
+					end
+				end
+				curr = curr:parent()
+			end
+		end
+	end
+
+	-- Fallback to regex backwards scan
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	for i = row, 1, -1 do
+	for i = math.min(row, #lines), 1, -1 do
 		local line = lines[i]
 		if line then
-			local m = line:match("^func%s+(Test%w+)") or line:match("^func%s*%([^%)]+%)%s*(Test%w+)")
+			local m = line:match("^%s*func%s+((Test|Benchmark|Example)[%w_]*)")
+				or line:match("^%s*func%s*%b()%s*((Test|Benchmark|Example)[%w_]*)")
 			if m then
 				return m
 			end
@@ -168,19 +221,45 @@ function M.detect_test_func(bufnr, row)
 end
 
 ---Detect the name of any function at or above the cursor
----@param bufnr integer
----@param row integer  1-indexed row
+---@param bufnr integer?
+---@param row integer?  1-indexed row
 ---@return string|nil
 function M.detect_any_func(bufnr, row)
+	bufnr = bufnr or vim.api.nvim_get_current_buf()
+	row = row or vim.api.nvim_win_get_cursor(0)[1]
+
+	-- Try treesitter first (Neovim 0.12 native)
+	local ok_ts, ts = pcall(require, "vim.treesitter")
+	if ok_ts and ts.get_node then
+		local ok_node, node = pcall(ts.get_node, { bufnr = bufnr, pos = { row - 1, 0 } })
+		if ok_node and node then
+			local curr = node
+			while curr do
+				local ntype = curr:type()
+				if ntype == "function_declaration" or ntype == "method_declaration" then
+					for child in curr:iter_children() do
+						if child:type() == "identifier" or child:type() == "field_identifier" then
+							local name = vim.treesitter.get_node_text(child, bufnr)
+							if name then
+								return name
+							end
+						end
+					end
+				end
+				curr = curr:parent()
+			end
+		end
+	end
+
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	for i = row, 1, -1 do
+	for i = math.min(row, #lines), 1, -1 do
 		local line = lines[i]
 		if line then
 			-- Method with receiver: func (recv Type) MethodName(
-			local m = line:match("^func%s+%b()%s+(%w+)%s*%(")
+			local m = line:match("^%s*func%s+%b()%s+([%w_]+)%s*%(")
 			if m then return m end
 			-- Plain function: func FuncName(
-			m = line:match("^func%s+(%w+)%s*%(")
+			m = line:match("^%s*func%s+([%w_]+)%s*%(")
 			if m then return m end
 		end
 	end
